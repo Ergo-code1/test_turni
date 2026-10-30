@@ -882,7 +882,7 @@ function rcDay(p,day){
 }
 function plan(p,day){return rcDay(p,day)?"R":plan0(p,day)}
 const hOf=k=>S.hist&&S.hist[k];
-const shift=(p,day)=>{const k=p.id+"|"+day,o=S.ov[k]||hOf(k);return o==="RC"?"R":o||plan(p,day)}
+const shift=(p,day)=>{if(p.msid)return msShiftOf(p,day);const k=p.id+"|"+day,o=S.ov[k]||hOf(k);return o==="RC"?"R":o||plan(p,day)}
 // Niente effetti sul passato: prima di una modifica alla pianificazione (giro, profilo, regole) salva in S.hist
 // i turni dei giorni passati (da inizio anno precedente a ieri) che la modifica cambierebbe
 // Annulla: prima di ogni modifica su una sola persona salvo com'era (piano, giro, regole, cambi, storico dei giorni passati)
@@ -1014,7 +1014,7 @@ $("next").onclick=()=>{cur.m++;if(cur.m>11){cur.m=0;cur.y++}if(!me)closeSheet();
 document.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;closeSheet();render()});
 function closeSheet(){$("sheet").hidden=true}
 
-function editCell(p,day){
+function editCell(p,day){if(p&&p.msid){toast("Turni Montastampi: si modificano da Turni › Montastampi");return}
   const s=$("sheet"),o=S.ov[p.id+"|"+day],r=reqOf(p.id,day),we=isWe(day);
   const codes=["M","P","MSV","PSV","N","G","SV","CO","TR","CM","BD","R","RC","F","MA","L","SW","DS"];
   s.innerHTML=`<div class="row" style="justify-content:space-between"><strong>${p.name} · ${D(day).toLocaleDateString("it-IT",{weekday:"long",day:"numeric",month:"long"})}</strong><button id="xs">Chiudi</button></div>
@@ -1686,6 +1686,29 @@ function msAfterLoad(p,name){
  MS.st="Dati caricati: "+Object.values(E().state.schedules).reduce((a,d)=>a+Object.values(d||{}).reduce((b,x)=>b+Object.keys(x||{}).length,0),0)+" turni.";
 }
 const msValid=p=>p&&Array.isArray(p.staff)&&typeof p.schedules==="object";
+/* Dati Montastampi per la griglia Persone: una lettura all'apertura (solo per chi vede il reparto), senza motore */
+const MSP={st:null,map:null,loading:false,done:false};
+const MSCODE={M:"M",P:"P",N:"N",GG:"G",FERIE:"F",MALATTIA:"MA",MUTUA:"MA",RIPOSO:"R",CORSO:"CO","G Corso":"CO","C.MAT":"CM"};
+const MSNF=new Set(["andrea-paonessa","gregorio-cignetti","silvio-morello"]);
+function msStaffName(sp){const t=String(sp.name||"").trim().toLowerCase().split(/\s+/).map(w=>w.charAt(0).toUpperCase()+w.slice(1));if(t.length<2||MSNF.has(sp.id))return t.join(" ");return [t[t.length-1],...t.slice(0,-1)].join(" ")}
+function msCurSt(){return MS.loaded&&E()?E().state:MSP.st}
+function msShiftOf(p,day){const st=msCurSt();if(!st)return "";const m=(st.schedules||{})[day.slice(0,7)];if(!m)return "";const v=(m[day]||{})[p.msid]||"";return v===""||v==="."?"R":(MSCODE[v]||v)}
+function msPeopleKick(){
+ if(MSP.done||MSP.loading||!TFD.ready||!LOGGED)return;const r=msRep();if(!r||!repAccess(r)){MSP.done=true;return}
+ MSP.loading=true;(async()=>{try{
+  if(msBE()==="fb"){const q=await TFD.fb.db.collection(MSCOL).get(),map={};q.docs.forEach(d=>{const x=d.data();if(typeof x.j==="string")map[d.id]=x.j;if(d.id==="base")MSP.rev=x.rev||0});if(map.base){MSP.map=map;MSP.st=msJoin(map)}}
+  else if(msBE()==="mem"){await new Promise(res=>{if(globalThis.MS_DEMO)return res();const s=document.createElement("script");s.src="ms_demo.js";s.onload=res;s.onerror=res;document.head.appendChild(s)});if(msValid(globalThis.MS_DEMO))MSP.st=globalThis.MS_DEMO}
+ }catch(e){console.warn("Montastampi persone:",e)}finally{MSP.loading=false;MSP.done=true;if(MSP.st)render()}})();
+}
+function msSyncPeople(){
+ const st=msCurSt(),rep=msRep();if(!st||!rep||!Array.isArray(st.staff))return;
+ const norm=x=>String(x||"").toLowerCase().split(/\s+/).filter(Boolean).sort().join(" ");let ch=false;
+ st.staff.forEach(sp=>{let p=S.people.find(x=>x.msid===sp.id);
+  if(!p){p=S.people.find(x=>x.rep===rep.id&&!x.msid&&norm(x.name)===norm(sp.name));if(p){p.msid=sp.id;ch=true}}
+  if(!p){p={id:Math.max(0,...S.people.map(x=>x.id))+1,name:msStaffName(sp),prof:"standard",off:0,rep:rep.id,msid:sp.id};S.people.push(p);ch=true}
+  if(p.rep!==rep.id){p.rep=rep.id;ch=true}});
+ if(ch)save();
+}
 async function msRead(){
  const be=msBE();
  if(be==="pc"){
@@ -1693,8 +1716,8 @@ async function msRead(){
   const j=await r.json(),p=j&&j.data;if(!msValid(p))throw new Error("Formato dati non valido");
   msAfterLoad(p,j.fileName||"database.db");return}
  if(be==="fb"){
-  const q=await TFD.fb.db.collection(MSCOL).get(),map={};
-  q.docs.forEach(d=>{const x=d.data();if(typeof x.j==="string")map[d.id]=x.j;if(d.id==="base")MS.rev=x.rev||0});
+  let map={};if(MSP.map){map=MSP.map;MS.rev=MSP.rev||0;MSP.map=null}else{const q=await TFD.fb.db.collection(MSCOL).get();
+  q.docs.forEach(d=>{const x=d.data();if(typeof x.j==="string")map[d.id]=x.j;if(d.id==="base")MS.rev=x.rev||0})}
   if(!map.base){MS.empty=true;MS.sig={};MS.rev=0;return}
   const p=msJoin(map);if(!msValid(p))throw new Error("Formato dati non valido");
   msAfterLoad(p,MSBN.fb);MS.sig=Object.assign({},map);return}
@@ -2090,13 +2113,13 @@ async function tfExit(){
 }
 const render0=render;
 render=function(){render0();try{tfAfter()}catch(e){console.error(e)}};
-function tfAfter(){
+function tfAfter(){msPeopleKick();msSyncPeople();
  const ar=S.reparti.filter(isAutoRep).filter(repAccess);
  $("acms").hidden=false;
  if((tab==="imp"||tab==="turni")&&!canSet()){tab="persone";return render()}
  $("bdgt").hidden=$("bdgms").hidden||$("acms").hidden;$("bdgt").textContent=$("bdgms").textContent;
  tfConfDraw();
- if(tab==="persone"&&repF&&isAutoRep(S.reparti.find(r=>r.id===repF)))$("gtitle").textContent="Montastampi: i turni si gestiscono in Turni › Montastampi";
+ 
  if(tab==="turni"){if($("acms").open&&!$("acms").hidden)msRender();if($("acrul").open)rulRender();$("bdgt").hidden=$("bdgms").hidden||$("acms").hidden;$("bdgt").textContent=$("bdgms").textContent}
  tfStatus();
 }
