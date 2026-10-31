@@ -2018,7 +2018,7 @@ function msCover(y,m){const r=msRep();if(!r||msAuto())return [];const out=[],pp=
   const dw=D(day).getDay();v.weeks.forEach((w,i)=>{const t=dw===6?w.sab:dw===0?w.dom:w.t;if(!t||t==="R")return;
    if(!pp.some(p=>giroIx(p,day)===i&&!absent(p,day)&&shift(p,day)!=="R"))out.push({d:day,pid:0,msg:`S${i+1} (${LAB[t]||t}) scoperta: nessuno presente`})})}
  return out}
-function msNotes(y,m){const r=msRep();if(!r)return [];const out=[],seen=new Set(),n=new Date(y,m+1,0).getDate();for(let d=1;d<=n;d+=7){const day=iso(y,m,d),v=verOf(r.versions,day);if(!v||v.uni||v.auto||!(v.weeks||[]).length)continue;const m0=monday(day);if(seen.has(m0))continue;seen.add(m0);msWkMap(v,m0).note.forEach(t=>out.push({d:m0,pid:0,msg:t}))}return out}
+function msNotes(y,m){const r=msRep();if(!r)return [];const out=[],seen=new Set(),n=new Date(y,m+1,0).getDate();for(let d=1;d<=n;d+=7){const day=iso(y,m,d),v=verOf(r.versions,day);if(!v||v.uni||v.auto||!(v.weeks||[]).length)continue;const m0=monday(day);if(seen.has(m0))continue;seen.add(m0);[...new Set(msWkMap(v,m0).note)].forEach(t=>out.push({d:m0,pid:0,msg:t}))}return out}
 function msConf(y,m){return msNotes(y,m)}
 function msConfOld(y,m){const c=msConf0(y,m);return msAuto()?c:c.concat(msCover(y,m)).sort((a,b)=>a.d<b.d?-1:a.d>b.d?1:0)}
 function msConf0(y,m){
